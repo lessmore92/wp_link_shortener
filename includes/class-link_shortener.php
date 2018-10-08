@@ -235,6 +235,9 @@ class Link_shortener
     }
 
 
+    /**
+     * initial plugin
+     */
     public function init()
     {
         $args = array(
@@ -270,14 +273,20 @@ class Link_shortener
         add_filter('query_vars', array($this, 'query_vars'));
     }
 
-
+    /**
+     * add a query var, that used for for paginate in front end
+     * @param $query_vars
+     * @return array
+     */
     public function query_vars($query_vars)
     {
-        //use for paginate in front end
         $query_vars[] = 'lsh_page';
         return $query_vars;
     }
 
+    /**
+     * add meta box to add/edit page(admin aera)
+     */
     public function add_meta_box()
     {
         add_meta_box("lsh-meta", __("Short URL", $this->plugin_name), array(
@@ -286,6 +295,9 @@ class Link_shortener
         ), $this->cpt_name, "normal", "low");
     }
 
+    /**
+     * generate meta box for getting url to be shorten
+     */
     public function meta_box_content()
     {
         global $post;
@@ -311,6 +323,10 @@ class Link_shortener
         <?php
     }
 
+    /**
+     * save short link
+     * @param $post_id
+     */
     public function save_url($post_id)
     {
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)
@@ -333,11 +349,20 @@ class Link_shortener
         update_post_meta($post_id, '_lsh_url', $_POST['url']);
     }
 
+    /**
+     * save post error serve
+     * @param $location
+     * @return string
+     */
     public function invalid_url($location)
     {
         return $location . '&lsh_message=1';
     }
 
+    /**
+     * check id current post is a short link, if true increment view and redirect to original link url
+     * @return bool
+     */
     public function check_url()
     {
         global $wp_query;
@@ -356,6 +381,7 @@ class Link_shortener
     }
 
     /**
+     * Custom list columns
      * @param array of columns
      * @return mixed
      */
@@ -374,6 +400,11 @@ class Link_shortener
         return $out;
     }
 
+    /**
+     * Custom list columns content
+     * @param $column_name
+     * @param $post_id
+     */
     public function column_content($column_name, $post_id)
     {
         $post_metas = get_post_meta($post_id);
@@ -393,6 +424,10 @@ class Link_shortener
         }
     }
 
+    /**
+     * [lsh_links] shortcode - generate front end links list
+     * @return string
+     */
     public function shortcode()
     {
         $query = new WP_Query(array(
