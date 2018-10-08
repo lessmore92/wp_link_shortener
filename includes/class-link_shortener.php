@@ -283,7 +283,8 @@ class Link_shortener
         global $post;
         wp_nonce_field('lsh_nonce', 'lsh_nonce');
 
-        $short_id = get_post_meta($post->ID, 'short_id', true);
+        $url = get_post_meta($post->ID, '_lsh_url', true);
+        $short_id = get_post_meta($post->ID, '_lsh_short_id', true);
 
         if (!empty($_GET['lsh_message'])) :
             switch ((int)$_GET['lsh_message']) :
@@ -296,11 +297,12 @@ class Link_shortener
             endswitch;
         endif
         ?>
-        <p>
-            <label><?php echo __('Shorten Url', $this->plugin_name) ?>:</label>
-            <input name="short_id" type="text" value="<?php echo $short_id ?>"/>
-            <?php echo __("You can put your custom shorten url here if wanted!", $this->plugin_name) ?>
-        </p>
+        <table class="form-table">
+            <tr>
+                <th scope="row"><label><?php echo __('Destination Url', $this->plugin_name) ?>:</label></th>
+                <td><input name="url" type="text" value="<?php echo $url ?>" class="regular-text"/></td>
+            </tr>
+        </table>
         <?php
         if (!empty($short_id)) :
             ?>
@@ -330,25 +332,29 @@ class Link_shortener
             return;
 
         //Also, if the url is invalid, add custom message
-        if (!preg_match('|^http(s)?://[a-z0-9-]+(.[a-z0-9-]+)*(:[0-9]+)?(/.*)?$|i', $post->post_title))
+        if (!preg_match('|^http(s)?://[a-z0-9-]+(.[a-z0-9-]+)*(:[0-9]+)?(/.*)?$|i', $_POST['url']))
         {
             add_filter('redirect_post_location', array($this, 'invalid_url'));
         }
 
-        $short_id = empty($_POST['short_id']) ? base_convert($post_id, 10, 36) : preg_replace('/[^a-z0-9_]/i', '_', $_POST['short_id']);
+        $short_id = empty($_POST['short_id']) ? $this->alphaID($post_id) : preg_replace('/[^a-z0-9_]/i', '_', $_POST['short_id']);
+        /*
         $old_short_id = get_post_meta($post_id, 'short_id', true);
         if ($short_id == $old_short_id)
         {
             //We are updating post, and the short_id is not changed so it's not necessary to save again
             return;
         }
+        */
         //If our short_id already exists! Let regenerate till we get a new short_id
-        while ($this->_findUrlByShortId($short_id))
+        $try_count = 1;
+        while ($this->_findUrlByShortId($short_id) && $try_count < 10)
         {
-            $short_id = base_convert(time() + rand(1, 10000), 10, 36);
+            $try_count++;
+            $short_id = $this->alphaID($post_id, false, $try_count);
             add_filter('redirect_post_location', array($this, 'invalid_short_id'));
         }
-        update_post_meta($post_id, 'short_id', $short_id);
+        update_post_meta($post_id, '_lsh_url', $_POST['url']);
     }
 
     /**
@@ -360,18 +366,20 @@ class Link_shortener
     private function _findUrlByShortId($short_id)
     {
         global $wpdb;
-        $sql = "SELECT m.post_id, p.post_title as url
-            FROM {$wpdb->prefix}postmeta as m 
-            LEFT JOIN {$wpdb->prefix}posts as p ON m.post_id=p.id
-            WHERE  m.meta_key='short_id' AND m.meta_value='%s'
-        ";
+        $sql = "SELECT m.post_id FROM {$wpdb->prefix}postmeta as m LEFT JOIN {$wpdb->prefix}posts as p ON m.post_id=p.id WHERE m.meta_key='short_id' AND m.meta_value='%s'";
         $result = $wpdb->get_row($wpdb->prepare($sql, $short_id));
         if (!$result)
         {
             return false;
         }
-        'http://' != substr($result->url, 0, '7') && $result->url = 'http://' . $result->url;
-        return $result->url;
+
+        $metas = get_post_meta($result->post_id);
+        $out['id'] = $result->post_id;
+        $out['url'] = $metas['_lsh_url'];
+        $out['short_id'] = $metas['_lsh_short_id'];
+        $out['views'] = $metas['_lsh_views'];
+
+        return $out;
     }
 
     public function invalid_short_id($location)
@@ -387,15 +395,18 @@ class Link_shortener
     public function check_url()
     {
         global $wp_query;
-        if (!$wp_query->is_404)
+        if ($wp_query->query_vars['post_type'] != $this->cpt_name)
         {
-            //This is a valid URL of WordPress!
+            //This is a not a short link
             return false;
         }
-        $short_id = empty($wp_query->query['pagename']) ? false : $wp_query->query['pagename'];
+        $short_id = empty($wp_query->query['name']) ? false : $wp_query->query['name'];
+        var_dump($short_id);
+        exit;
         if ($short_id && $url = $this->_findUrlByShortId($short_id))
         {
-            wp_redirect($url);
+            update_post_meta($url['id'], '_lsh_views', intval($url['views']) + 1);
+            wp_redirect($url['url']);
         }
     }
 
@@ -406,20 +417,106 @@ class Link_shortener
     public function custom_column($columns)
     {
         $columns['short_id'] = __('Shorten Url');
+        $columns['views'] = __('Views');
         return $columns;
     }
 
     public function column_content($column_name, $post_id)
     {
+        $post_metas = get_post_meta($post_id);
+        $short_id = $post_metas['short_id'];
+        $views = $post_metas['views'];
         switch ($column_name)
         {
             case 'short_id':
-                $short_id = get_post_meta($post_id, 'short_id', true);
                 if ($short_id)
                 {
                     echo sprintf('<a target="_blank" href="%s" title="Original URL">%s</a>', trailingslashit(get_bloginfo('url')), $short_id, $short_id);
                 }
                 break;
+            case 'views':
+                if ($views)
+                {
+                    echo sprintf(_n('%s view', '%s views', $views, $this->plugin_name), $views);;
+                }
+                break;
         }
+    }
+
+    /**
+     * @param mixed $in String or long input to translate
+     * @param boolean $to_num Reverses translation when true
+     * @param mixed $pad_up Number or boolean padds the result up to a specified length
+     * @param string $passKey Supplying a password makes it harder to calculate the original ID
+     * @return mixed string or long
+     */
+    private function alphaID($in, $to_num = false, $pad_up = false, $passKey = null)
+    {
+        $index = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        if ($passKey !== null)
+        {
+            // Although this function's purpose is to just make the
+            // ID short - and not so much secure,
+            // with this patch by Simon Franz (http://blog.snaky.org/)
+            // you can optionally supply a password to make it harder
+            // to calculate the corresponding numeric ID
+            for ($n = 0; $n < strlen($index); $n++)
+            {
+                $i[] = substr($index, $n, 1);
+            }
+            $passhash = hash('sha256', $passKey);
+            $passhash = (strlen($passhash) < strlen($index)) ? hash('sha512', $passKey) : $passhash;
+            for ($n = 0; $n < strlen($index); $n++)
+            {
+                $p[] = substr($passhash, $n, 1);
+            }
+            array_multisort($p, SORT_DESC, $i);
+            $index = implode($i);
+        }
+        $base = strlen($index);
+        if ($to_num)
+        {
+            // Digital number  <<--  alphabet letter code
+            $in = strrev($in);
+            $out = 0;
+            $len = strlen($in) - 1;
+            for ($t = 0; $t <= $len; $t++)
+            {
+                $bcpow = bcpow($base, $len - $t);
+                $out = $out + strpos($index, substr($in, $t, 1)) * $bcpow;
+            }
+            if (is_numeric($pad_up))
+            {
+                $pad_up--;
+                if ($pad_up > 0)
+                {
+                    $out -= pow($base, $pad_up);
+                }
+            }
+            $out = sprintf('%F', $out);
+            $out = substr($out, 0, strpos($out, '.'));
+        }
+        else
+        {
+            // Digital number  -->>  alphabet letter code
+            if (is_numeric($pad_up))
+            {
+                $pad_up--;
+                if ($pad_up > 0)
+                {
+                    $in += pow($base, $pad_up);
+                }
+            }
+            $out = "";
+            for ($t = floor(log($in, $base)); $t >= 0; $t--)
+            {
+                $bcp = bcpow($base, $t);
+                $a = floor($in / $bcp) % $base;
+                $out = $out . substr($index, $a, 1);
+                $in = $in - ($a * $bcp);
+            }
+            $out = strrev($out); // reverse
+        }
+        return $out;
     }
 }
