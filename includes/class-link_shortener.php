@@ -273,6 +273,7 @@ class Link_shortener
 
     public function query_vars($query_vars)
     {
+        //use for paginate in front end
         $query_vars[] = 'lsh_page';
         return $query_vars;
     }
@@ -295,7 +296,7 @@ class Link_shortener
         if (!empty($_GET['lsh_message'])) :
             switch ((int)$_GET['lsh_message']) :
                 case 1:
-                    echo '<div class="updated"><p>' . __("URL is not valid", $this->plugin_name) . '</p></div>';
+                    echo '<div class="notice notice-warning"><p>' . __("URL is not valid", $this->plugin_name) . '</p></div>';
                     break;
             endswitch;
         endif
