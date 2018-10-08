@@ -86,9 +86,9 @@ class Link_shortener
 
         $this->load_dependencies();
         $this->set_locale();
+        $this->loader->add_action('init', $this, 'init');
         $this->define_admin_hooks();
         $this->define_public_hooks();
-
     }
 
     /**
@@ -134,7 +134,6 @@ class Link_shortener
         require_once plugin_dir_path(dirname(__FILE__)) . 'public/class-link_shortener-public.php';
 
         $this->loader = new Link_shortener_Loader();
-
     }
 
     /**
@@ -166,7 +165,6 @@ class Link_shortener
     {
         $plugin_admin = new Link_shortener_Admin($this->get_plugin_name(), $this->get_version());
 
-        $this->loader->add_action('init', $this, 'init');
         $this->loader->add_action('add_meta_boxes', $this, 'add_meta_box');
         $this->loader->add_action('save_post', $this, 'save_url');
         $this->loader->add_action('get_header', $this, 'check_url');
@@ -268,6 +266,15 @@ class Link_shortener
             'supports'           => array('title')
         );
         register_post_type($this->cpt_name, $args);
+        add_shortcode('lsh_links', array($this, 'shortcode'));
+        add_filter('query_vars', array($this, 'query_vars'));
+    }
+
+
+    public function query_vars($query_vars)
+    {
+        $query_vars[] = 'lsh_page';
+        return $query_vars;
     }
 
     public function add_meta_box()
@@ -305,7 +312,6 @@ class Link_shortener
 
     public function save_url($post_id)
     {
-        global $post;
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)
             return;
 
@@ -384,5 +390,43 @@ class Link_shortener
                 echo sprintf(_n('%s view', '%s views', $views, $this->plugin_name), $views);
                 break;
         }
+    }
+
+    public function shortcode()
+    {
+        $query = new WP_Query(array(
+            'post_type'      => $this->cpt_name,
+            'posts_per_page' => '10',
+            'paged'          => get_query_var('lsh_page'),
+        ));
+
+
+        $output = '<ul class="links">';
+
+        while ($query->have_posts()) : $query->the_post();
+            $views = get_post_meta(get_the_ID(), '_lsh_views', true);
+            $views = $views ? $views : 0;
+            $output .= '<li><a href="' . get_permalink() . '">' . get_the_title() . '</a>  <small>(' . sprintf(_n('%s view', '%s views', $views, $this->plugin_name), $views) . ')</small></li>';
+
+        endwhile;
+        $output .= '</ul>';
+
+        $output .= paginate_links(array(
+            'base'         => add_query_arg('lsh_page', '%#%'),
+            'total'        => $query->max_num_pages,
+            'current'      => max(1, get_query_var('lsh_page')),
+            'format'       => '',
+            'show_all'     => false,
+            'type'         => 'plain',
+            'end_size'     => 2,
+            'mid_size'     => 1,
+            'prev_next'    => false,
+            'add_args'     => false,
+            'add_fragment' => '',
+        ));
+
+        wp_reset_query();
+
+        return $output;
     }
 }
